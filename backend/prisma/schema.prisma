@@ -1,0 +1,174 @@
+// Prisma Schema for TRIBE (District Clone)
+// PostgreSQL Database definition with high-concurrency booking & Razorpay integration
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  HOSTESS_SCANNER
+  ADMIN
+}
+
+enum EventCategory {
+  CONCERT
+  DINE_IN
+  TRAVEL
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  CHECKED_IN
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  CREATED
+  AUTHORIZED
+  CAPTURED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentMethod {
+  UPI
+  CARD
+  NETBANKING
+  WALLET
+  PAY_AT_VENUE
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String?  @unique
+  phone     String   @unique
+  name      String
+  avatarUrl String?
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookings  Booking[]
+  seatLocks SeatLock[]
+
+  @@map("users")
+}
+
+model Event {
+  id                String        @id @default(uuid())
+  slug              String        @unique
+  title             String
+  subtitle          String?
+  description       String
+  category          EventCategory
+  badge             String?       // e.g. "BESTSELLER", "FAST FILLING"
+  bannerUrl         String
+  city              String        // e.g. "Guwahati", "Shillong"
+  venue             String
+  address           String?
+  latitude          Float?
+  longitude         Float?
+  dateTime          DateTime
+  endDateTime       DateTime?
+  basePrice         Int           // in INR rupees
+  convenienceFee    Int           @default(0)
+  totalCapacity     Int
+  availableCapacity Int
+  tags              String[]      @default([])
+  isFeatured        Boolean       @default(false)
+  isActive          Boolean       @default(true)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  bookings  Booking[]
+  seatLocks SeatLock[]
+
+  @@index([city, category])
+  @@index([dateTime])
+  @@map("events")
+}
+
+model SeatLock {
+  id          String   @id @default(uuid())
+  eventId     String
+  slotKey     String   // e.g. "PASS_SLOT_14", "TABLE_ROOFTOP_4"
+  userId      String
+  lockedUntil DateTime
+  released    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, slotKey])
+  @@index([lockedUntil])
+  @@map("seat_locks")
+}
+
+model Booking {
+  id           String        @id @default(uuid())
+  passNumber   String        @unique // e.g. "TRB-9631-7212"
+  userId       String
+  eventId      String
+  totalAmount  Int           // in INR rupees
+  guestCount   Int           @default(1)
+  guestDetails Json?
+  status       BookingStatus @default(PENDING)
+  qrPayload    String        // Cryptographically signed verification payload
+  checkedInAt  DateTime?
+  checkedInBy  String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  user    User      @relation(fields: [userId], references: [id])
+  event   Event     @relation(fields: [eventId], references: [id])
+  payment Payment?
+
+  @@index([userId])
+  @@index([eventId])
+  @@index([status])
+  @@map("bookings")
+}
+
+model Payment {
+  id                String        @id @default(uuid())
+  bookingId         String        @unique
+  razorpayOrderId   String?       @unique // "order_..." from Razorpay API
+  razorpayPaymentId String?       @unique // "pay_..." from Razorpay API
+  razorpaySignature String?
+  amount            Int           // in INR rupees
+  currency          String        @default("INR")
+  status            PaymentStatus @default(CREATED)
+  method            PaymentMethod @default(UPI)
+  methodDetails     String?       // e.g. "Google Pay", "HDFC •••• 6789"
+  rawWebhookData    Json?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([razorpayOrderId])
+  @@index([razorpayPaymentId])
+  @@map("payments")
+}
+
+model WebhookLog {
+  id              String   @id @default(uuid())
+  razorpayEventId String?  @unique
+  eventName       String   // e.g. "payment.captured", "payment.failed"
+  payload         Json
+  signatureValid  Boolean  @default(false)
+  processed       Boolean  @default(false)
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+
+  @@map("webhook_logs")
+}
