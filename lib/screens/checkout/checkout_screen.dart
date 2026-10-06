@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -96,15 +97,396 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   late PriceBreakdown _pricing;
 
+  // Seat Reservation Countdown Timer (BookMyShow / Zomato Live standard: 8 mins)
+  Timer? _reservationTimer;
+  int _secondsRemaining = 480;
+  final int _totalHoldSeconds = 480;
+  bool _isSeatHoldExpired = false;
+  bool _isExpiredSheetOpen = false;
+
+  void _startReservationTimer() {
+    _reservationTimer?.cancel();
+    _reservationTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      if (_secondsRemaining > 1) {
+        setState(() {
+          _secondsRemaining--;
+        });
+      } else {
+        timer.cancel();
+        setState(() {
+          _secondsRemaining = 0;
+          _isSeatHoldExpired = true;
+        });
+        _handleSeatHoldExpired();
+      }
+    });
+  }
+
+  void _fastForwardExpiryTest() {
+    if (_isSeatHoldExpired) return;
+    setState(() {
+      _secondsRemaining = 5;
+    });
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Row(
+          children: [
+            Icon(Icons.bolt_rounded, color: AppColors.gold, size: 18),
+            SizedBox(width: 8),
+            Text('Timer fast-forwarded: expiring in 5s for QA review',
+                style: TextStyle(color: Colors.white, fontSize: 12)),
+          ],
+        ),
+        backgroundColor: Colors.grey.shade900,
+        duration: const Duration(seconds: 2),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  String _formatTimerDisplay(int totalSeconds) {
+    final minutes = (totalSeconds ~/ 60).toString().padLeft(2, '0');
+    final seconds = (totalSeconds % 60).toString().padLeft(2, '0');
+    return '$minutes:$seconds';
+  }
+
+  void _handleSeatHoldExpired() {
+    if (!mounted) return;
+    _showSeatExpiredSheet(context);
+  }
+
+  void _showSeatExpiredSheet(BuildContext context) {
+    if (!mounted || _isExpiredSheetOpen) return;
+    _isExpiredSheetOpen = true;
+
+    showModalBottomSheet(
+      context: context,
+      isDismissible: false,
+      enableDrag: false,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+          decoration: BoxDecoration(
+            color: AppTheme.surface(ctx),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            border: Border.all(color: Colors.red.withOpacity(0.35), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.6),
+                blurRadius: 24,
+                offset: const Offset(0, -6),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 44,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade700,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 22),
+              Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: Colors.red.withOpacity(0.12),
+                  border: Border.all(color: Colors.red.withOpacity(0.4), width: 2),
+                ),
+                child: const Icon(
+                  Icons.timer_off_rounded,
+                  color: Colors.redAccent,
+                  size: 38,
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                'Seat Reservation Expired',
+                style: GoogleFonts.outfit(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.textPrimary(ctx),
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Your 8-minute reservation window has ended. To ensure fair access for everyone, your held seats have been returned to the general pool.',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 13,
+                  height: 1.5,
+                  color: AppTheme.textSecondary(ctx),
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppTheme.cardColor(ctx),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.red.withOpacity(0.2)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.redAccent, size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.outfit(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.textPrimary(ctx),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Status: Released / Unreserved',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11,
+                              color: Colors.redAccent,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    _isExpiredSheetOpen = false;
+                    Navigator.of(ctx).pop();
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(Icons.replay_rounded, size: 18),
+                  label: Text(
+                    'Re-select Seats & Try Again',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextButton(
+                onPressed: () {
+                  _isExpiredSheetOpen = false;
+                  Navigator.of(ctx).pop();
+                  Navigator.of(context).popUntil((route) => route.isFirst);
+                },
+                child: Text(
+                  'Cancel & Return to Explore',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textMuted(ctx),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ).then((_) {
+      _isExpiredSheetOpen = false;
+    });
+  }
+
+  Widget _buildReservationTimerBanner(BuildContext context) {
+    final isWarning = _secondsRemaining <= 120 && !_isSeatHoldExpired;
+    final progress = (_secondsRemaining / _totalHoldSeconds).clamp(0.0, 1.0);
+
+    Color accentColor;
+    Color bgTint;
+    Color borderTint;
+    String statusTitle;
+    String subText;
+
+    if (_isSeatHoldExpired) {
+      accentColor = Colors.redAccent;
+      bgTint = Colors.red.withOpacity(0.12);
+      borderTint = Colors.red.withOpacity(0.35);
+      statusTitle = 'Seat Hold Expired (00:00)';
+      subText = 'Seats released back to pool. Payment disabled.';
+    } else if (isWarning) {
+      accentColor = const Color(0xFFFF9500); // vibrant amber
+      bgTint = const Color(0xFFFF9500).withOpacity(0.12);
+      borderTint = const Color(0xFFFF9500).withOpacity(0.35);
+      statusTitle = 'Hurry! Seats held for ${_formatTimerDisplay(_secondsRemaining)}';
+      subText = 'Complete payment before timer ends to lock your booking.';
+    } else {
+      accentColor = const Color(0xFF10B981); // Emerald
+      bgTint = const Color(0xFF10B981).withOpacity(0.08);
+      borderTint = const Color(0xFF10B981).withOpacity(0.25);
+      statusTitle = 'Seats held for ${_formatTimerDisplay(_secondsRemaining)}';
+      subText = 'Your seats are reserved while you finish payment.';
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: bgTint,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderTint, width: 1.2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  _isSeatHoldExpired
+                      ? Icons.timer_off_rounded
+                      : isWarning
+                          ? Icons.hourglass_bottom_rounded
+                          : Icons.timer_outlined,
+                  color: accentColor,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      statusTitle,
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.textPrimary(context),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subText,
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        color: AppTheme.textSecondary(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: accentColor.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: accentColor.withOpacity(0.3)),
+                    ),
+                    child: Text(
+                      _formatTimerDisplay(_secondsRemaining),
+                      style: GoogleFonts.outfit(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: accentColor,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                  if (!_isSeatHoldExpired) ...[
+                    const SizedBox(height: 4),
+                    InkWell(
+                      onTap: _fastForwardExpiryTest,
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceElevated(context),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: AppTheme.border(context)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.flash_on_rounded, size: 10, color: AppColors.gold),
+                            const SizedBox(width: 2),
+                            Text(
+                              '5s Test',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 9,
+                                fontWeight: FontWeight.w700,
+                                color: AppColors.gold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              backgroundColor: AppTheme.border(context).withOpacity(0.4),
+              valueColor: AlwaysStoppedAnimation<Color>(accentColor),
+              minHeight: 4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
     _razorpayService = RazorpayService();
     _recalculatePricing();
+    _startReservationTimer();
   }
 
   @override
   void dispose() {
+    _reservationTimer?.cancel();
     _razorpayService.dispose();
     _couponController.dispose();
     _upiIdController.dispose();
@@ -354,6 +736,12 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   void _processPayment() async {
+    // 0. Seat Reservation Timer Guard - Do not proceed if timer expired
+    if (_isSeatHoldExpired || _secondsRemaining <= 0) {
+      _showSeatExpiredSheet(context);
+      return;
+    }
+
     final auth = context.read<AuthProvider>();
     if (!auth.isAuthenticated) {
       // Require Sign-in if not logged in
@@ -472,6 +860,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   String _getButtonLabel() {
+    if (_isSeatHoldExpired || _secondsRemaining <= 0) {
+      return 'Seat Hold Expired (00:00)';
+    }
     final amount = '₹${NumberFormat('#,##,###').format(_pricing.totalPayable.toInt())}';
     switch (_selectedCategory) {
       case 'upi':
@@ -737,6 +1128,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Live Seat Reservation Countdown Timer Banner
+                _buildReservationTimerBanner(context),
+
                 // Order Item Summary Card
                 Container(
                   padding: const EdgeInsets.all(16),
@@ -1031,8 +1425,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                     Expanded(
                       child: AppButton(
                         text: _getButtonLabel(),
-                        icon: _getButtonIcon(),
-                        onPressed: _processPayment,
+                        icon: _isSeatHoldExpired ? Icons.timer_off_rounded : _getButtonIcon(),
+                        gradient: _isSeatHoldExpired
+                            ? const LinearGradient(colors: [Color(0xFF991B1B), Color(0xFF7F1D1D)])
+                            : null,
+                        onPressed: _isSeatHoldExpired ? () => _showSeatExpiredSheet(context) : _processPayment,
                       ),
                     ),
                   ],
@@ -1158,17 +1555,19 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 2,
                   children: [
                     Text(
                       'Powered by Razorpay Engine',
                       style: GoogleFonts.outfit(
-                        fontSize: 13,
+                        fontSize: 12.5,
                         fontWeight: FontWeight.w800,
                         color: isDark ? Colors.white : const Color(0xFF0C2340),
                       ),
                     ),
-                    const SizedBox(width: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
@@ -1178,7 +1577,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        hasCustomKey ? (isLive ? 'LIVE' : 'CUSTOM') : 'KEY ACTIVE',
+                        hasCustomKey ? (isLive ? 'LIVE' : 'CUSTOM') : 'ACTIVE',
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 8,
                           fontWeight: FontWeight.w800,
@@ -1192,9 +1591,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '$displayKey • Zero Web Redirects • Direct Handshake',
+                  '$displayKey • Zero Web Redirects',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: GoogleFonts.plusJakartaSans(
-                    fontSize: 10.5,
+                    fontSize: 10,
                     color: isDark ? Colors.white70 : const Color(0xFF4A5568),
                   ),
                 ),
@@ -2275,6 +2676,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return Center(
       child: TextButton.icon(
         onPressed: () {
+          if (_isSeatHoldExpired || _secondsRemaining <= 0) {
+            _showSeatExpiredSheet(context);
+            return;
+          }
           setState(() {
             _selectedCategory = 'hosted';
           });

@@ -6,6 +6,7 @@ const controller = new PaymentsController();
 
 router.post('/create-order', controller.createOrder);
 router.post('/verify', controller.verifyPayment);
+router.post('/release-lock', controller.releaseLock);
 router.post('/webhook', controller.handleWebhook);
 
 export const paymentRoutes = router;

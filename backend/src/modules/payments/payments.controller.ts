@@ -23,6 +23,13 @@ const verifyPaymentSchema = z.object({
   guestCount: z.number().int().positive().default(1),
   userId: z.string().default('user_guest_1'),
   paymentMethod: z.string().default('UPI'),
+  slotKey: z.string().optional(),
+});
+
+const releaseLockSchema = z.object({
+  eventId: z.string().min(1),
+  slotKey: z.string().min(1),
+  userId: z.string().default('user_guest_1'),
 });
 
 export class PaymentsController {
@@ -38,13 +45,14 @@ export class PaymentsController {
     try {
       const data = createOrderSchema.parse(req.body);
 
-      // 1. If slot key provided (e.g. concert seat or dining table), acquire 10-min lock
+      // 1. If slot key provided (e.g. concert seat or dining table), acquire 8-min lock
+      let lockResult: { success: boolean; lockKey: string; lockedUntil: Date; message: string } | null = null;
       if (data.slotKey) {
-        const lock = await this.seatLockService.acquireLock(data.eventId, data.slotKey, data.userId);
-        if (!lock.success) {
+        lockResult = await this.seatLockService.acquireLock(data.eventId, data.slotKey, data.userId);
+        if (!lockResult.success) {
           return res.status(409).json({
             success: false,
-            message: lock.message,
+            message: lockResult.message,
           });
         }
       }
@@ -61,6 +69,7 @@ export class PaymentsController {
           userId: data.userId,
           guestCount: data.guestCount.toString(),
           couponCode: data.couponCode || 'NONE',
+          slotKey: data.slotKey || 'GENERAL',
         },
       });
 
@@ -73,6 +82,8 @@ export class PaymentsController {
           currency: order.currency,
           receipt: order.receipt,
           keyId: this.razorpayService ? 'rzp_test_TjoMcngj0CGZMk' : '',
+          lockExpiresAt: lockResult ? lockResult.lockedUntil.toISOString() : undefined,
+          lockTtlSeconds: lockResult ? 480 : undefined,
         },
         message: 'Razorpay order created successfully',
       });
@@ -89,7 +100,19 @@ export class PaymentsController {
     try {
       const data = verifyPaymentSchema.parse(req.body);
 
-      // 1. Verify cryptographic signature
+      // 1. Enforce seat reservation lock window - if seat hold expired, reject payment!
+      if (data.slotKey) {
+        const isLockActive = await this.seatLockService.isLockValid(data.eventId, data.slotKey, data.userId);
+        if (!isLockActive) {
+          return res.status(410).json({
+            success: false,
+            code: 'SEAT_LOCK_EXPIRED',
+            message: 'Seat hold has expired. The seat has been released to other customers. Please re-select your seats.',
+          });
+        }
+      }
+
+      // 2. Verify cryptographic signature
       const isValid = this.razorpayService.verifySignature({
         razorpayOrderId: data.razorpayOrderId,
         razorpayPaymentId: data.razorpayPaymentId,
@@ -103,13 +126,13 @@ export class PaymentsController {
         });
       }
 
-      // 2. Generate authentic pass number (e.g. TRB-9631-7212)
+      // 3. Generate authentic pass number (e.g. TRB-9631-7212)
       const r1 = Math.floor(1000 + Math.random() * 9000);
       const r2 = Math.floor(1000 + Math.random() * 9000);
       const passNumber = `TRB-${r1}-${r2}`;
       const bookingId = `bk_${Date.now()}`;
 
-      // 3. Generate signed QR Payload
+      // 4. Generate signed QR Payload
       const signedQrPayload = this.passService.generateSignedPayload({
         passNumber,
         bookingId,
@@ -121,6 +144,11 @@ export class PaymentsController {
       });
 
       const qrCodeDataUrl = await this.passService.generateQrCodeDataUrl(signedQrPayload);
+
+      // 5. Clean up seat hold lock now that booking is confirmed
+      if (data.slotKey) {
+        await this.seatLockService.releaseLock(data.eventId, data.slotKey, data.userId);
+      }
 
       return res.status(200).json({
         success: true,
@@ -136,6 +164,24 @@ export class PaymentsController {
           qrCodeDataUrl,
           issuedAt: new Date().toISOString(),
         },
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
+
+  /**
+   * POST /api/v1/payments/release-lock
+   * Explicitly releases seat hold when checkout timer expires or user abandons checkout
+   */
+  public releaseLock = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const data = releaseLockSchema.parse(req.body);
+      const released = await this.seatLockService.releaseLock(data.eventId, data.slotKey, data.userId);
+      return res.status(200).json({
+        success: true,
+        released,
+        message: released ? 'Seat hold released back to general pool' : 'Lock already expired or released',
       });
     } catch (error) {
       next(error);

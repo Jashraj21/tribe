@@ -66,3 +66,27 @@ test('SeatLockService - Acquires and releases inventory locks', async () => {
   const lock3 = await lockService.acquireLock('concert_ziro_2026', 'SEAT_VIP_A1', 'user_beta');
   assert.equal(lock3.success, true);
 });
+
+test('SeatLockService - Validates active locks and detects expiration', async () => {
+  const lockService = SeatLockService.getInstance();
+
+  // 1. Acquire short 1-second lock
+  const lock = await lockService.acquireLock('concert_shillong_2026', 'SEAT_FRONT_B2', 'user_gamma', 1);
+  assert.equal(lock.success, true);
+
+  // 2. Lock should be valid immediately
+  const isValidImmediately = await lockService.isLockValid('concert_shillong_2026', 'SEAT_FRONT_B2', 'user_gamma');
+  assert.equal(isValidImmediately, true);
+
+  // 3. Different user checking should return false
+  const isDifferentUserValid = await lockService.isLockValid('concert_shillong_2026', 'SEAT_FRONT_B2', 'user_intruder');
+  assert.equal(isDifferentUserValid, false);
+
+  // 4. Wait 1.1s for lock to expire
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+
+  // 5. Expired lock must return false
+  const isStillValidAfterExpiry = await lockService.isLockValid('concert_shillong_2026', 'SEAT_FRONT_B2', 'user_gamma');
+  assert.equal(isStillValidAfterExpiry, false);
+});
+

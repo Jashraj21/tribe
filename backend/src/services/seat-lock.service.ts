@@ -128,6 +128,32 @@ export class SeatLockService {
     return false;
   }
 
+  /**
+   * Check if a lock is still valid and held by userId
+   */
+  public async isLockValid(eventId: string, slotKey: string, userId: string): Promise<boolean> {
+    const lockKey = `lock:${eventId}:${slotKey}`;
+    const now = Date.now();
+
+    if (this.redisClient) {
+      try {
+        const currentHolder = await this.redisClient.get(lockKey);
+        if (currentHolder === userId) {
+          return true;
+        }
+      } catch {
+        // Fall through to in-memory
+      }
+    }
+
+    this.cleanupExpiredMemoryLocks();
+    const existing = this.inMemoryLocks.get(lockKey);
+    if (existing && existing.userId === userId && existing.lockedUntil > now) {
+      return true;
+    }
+    return false;
+  }
+
   private cleanupExpiredMemoryLocks() {
     const now = Date.now();
     for (const [key, value] of this.inMemoryLocks.entries()) {
