@@ -1,4 +1,4 @@
-# District - Live Concerts & Dine-In Booking App
+# Tribe - Live Concerts & Dine-In Booking App
 
 > A premium, high-octane Android application built with **Flutter** for booking live stadium concerts, music festivals, comedy tours, and curated rooftop dine-in reservations with full authentication and multi-method payment gateway integration. Inspired by modern entertainment & nightlife platforms like Zomato District.
 
